@@ -34,10 +34,6 @@ std::shared_ptr<CudaMemoryPoolBlock> CudaMemoryPool::Allocate(std::size_t size, 
     return block;
 }
 
-std::shared_ptr<CudaMemoryPoolBlock> CudaMemoryPool::Allocate(std::size_t size) {
-    return this->Allocate(size, std::make_shared<CudaStream>(true));
-}
-
 void CudaMemoryPool::Free(void *handle, const CudaStream &stream, bool from_destructor) {
     auto ret = cudaFreeAsync(handle, stream.GetHandle());
     CheckCudaError(ret, "Failed to free memory");
@@ -58,8 +54,6 @@ void CudaMemoryPool::Resize(std::size_t new_size, std::shared_ptr<CudaStream> st
     auto ret = cudaMemPoolCreate(&this->pool_, &props);
     CheckCudaError(ret, "Failed to create CUDA memory pool");
 
-    decltype(this->blocks_) new_blocks;
-
     for (auto &block : this->blocks_) {
         auto new_block = this->Allocate(block.second->GetSize(), stream);
         auto ret = cudaMemcpyAsync(
@@ -71,11 +65,15 @@ void CudaMemoryPool::Resize(std::size_t new_size, std::shared_ptr<CudaStream> st
         );
 
         CheckCudaError(ret, "Failed to resize pool");
-        new_blocks[block.first] = std::move(new_block);
+        block.second->Replace(std::move(*new_block));
     }
-
-    this->blocks_ = std::move(new_blocks);
 
     ret = cudaMemPoolDestroy(old_pool);
     CheckCudaError(ret, "Failed to destroy CUDA memory pool");
+}
+
+std::size_t CudaMemoryPool::GetSize() const noexcept {
+    return std::accumulate(this->blocks_.begin(), this->blocks_.end(), std::size_t(0), [](std::size_t sum, const auto &block) {
+        return sum + block.second->GetSize();
+    });
 }

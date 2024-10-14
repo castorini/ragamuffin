@@ -8,6 +8,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <numeric>
 #include <unordered_map>
 #include <vector>
 
@@ -20,15 +21,18 @@ struct CudaMemoryPool {
     ~CudaMemoryPool();
 
     // Allocate/deallocate memory from the pool
-    std::shared_ptr<CudaMemoryPoolBlock> Allocate(std::size_t size);  // default stream
-    std::shared_ptr<CudaMemoryPoolBlock> Allocate(std::size_t size, std::shared_ptr<CudaStream> stream);
+    std::shared_ptr<CudaMemoryPoolBlock> Allocate(
+        std::size_t size,
+        std::shared_ptr<CudaStream> stream = std::make_shared<CudaStream>(true) // default stream
+    );  
     void Free(void *handle, const CudaStream &stream, bool from_destructor = false);
 
     // Resize the pool; this is very slow and should be used sparingly. It copies all the memory from the old pool to the new pool,
     // updating the pointers in the process. This is not thread-safe.
-    void Resize(std::size_t new_size, std::shared_ptr<CudaStream> stream);
+    void Resize(std::size_t new_size, std::shared_ptr<CudaStream> stream = nullptr);
 
     inline std::size_t GetMaxSize() const noexcept { return this->max_size_; }
+    std::size_t GetSize() const noexcept;
 
 private:
     std::size_t max_size_;
@@ -64,8 +68,22 @@ struct CudaMemoryPoolBlock {
     inline std::size_t GetSize() const noexcept { return this->size_; }
     inline const CudaStream &GetStream() const noexcept { return *this->stream_; }
 
-    inline void Free() {
-        this->pool_.Free(this->ptr_, *this->stream_);
+    inline void Replace(CudaMemoryPoolBlock &&other) noexcept {
+        if (this->ptr_) {
+            this->Free(true);  // don't get rid of the block; we're just replacing it
+            this->ptr_ = nullptr;
+        }
+
+        this->ptr_ = other.ptr_;
+        this->size_ = other.size_;
+        this->pool_ = other.pool_;
+        this->stream_ = std::move(other.stream_);
+        other.ptr_ = nullptr;
+        other.size_ = 0;
+    }
+    
+    inline void Free(bool from_destructor = false) {
+        this->pool_.Free(this->ptr_, *this->stream_, from_destructor);
         this->ptr_ = nullptr;
     }
 
@@ -74,7 +92,6 @@ private:
     void *ptr_;
     std::size_t size_;
     std::shared_ptr<CudaStream> stream_;
-    bool freed_ = false;
 };
 
 } // namespace ragamuffin
