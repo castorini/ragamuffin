@@ -1,11 +1,14 @@
+#pragma once
+
 #include "CudaDevice.hpp"
 #include "CudaStream.hpp"
 
 #include <cuda_runtime.h>
 
-#include <vector>
-#include <mutex>
 #include <iostream>
+#include <memory>
+#include <mutex>
+#include <vector>
 
 namespace ragamuffin {
 
@@ -15,7 +18,8 @@ struct CudaMemoryPool {
     CudaMemoryPool(std::size_t max_size, const CudaDevice &device);
     ~CudaMemoryPool();
 
-    CudaMemoryPoolBlock Allocate(std::size_t size, const CudaStream &stream) const;
+    std::unique_ptr<CudaMemoryPoolBlock> Allocate(std::size_t size) const;  // default stream
+    std::unique_ptr<CudaMemoryPoolBlock> Allocate(std::size_t size, std::shared_ptr<CudaStream> stream) const;
     void Free(void *handle, const CudaStream &stream) const;
 
     inline std::size_t GetMaxSize() const noexcept { return this->max_size_; }
@@ -26,12 +30,13 @@ private:
 };
 
 struct CudaMemoryPoolBlock {
-    friend struct CudaMemoryPool;
+    CudaMemoryPoolBlock(const CudaMemoryPool &pool, void *ptr, std::size_t size, std::shared_ptr<CudaStream> stream)
+        : pool_(pool), ptr_(ptr), size_(size), stream_(stream) {}
 
     // Destructor
     ~CudaMemoryPoolBlock() {
         if (this->ptr_)
-            this->pool_.Free(this->ptr_, this->stream_);
+            this->pool_.Free(this->ptr_, *this->stream_);
     }
 
     // Move constructor
@@ -48,16 +53,13 @@ struct CudaMemoryPoolBlock {
 
     inline void *GetHandle() const noexcept { return this->ptr_; }
     inline std::size_t GetSize() const noexcept { return this->size_; }
-    inline const CudaStream &GetStream() const noexcept { return this->stream_; }
+    inline const CudaStream &GetStream() const noexcept { return *this->stream_; }
 
 private:
-    CudaMemoryPoolBlock(const CudaMemoryPool &pool, void *ptr, std::size_t size, const CudaStream &stream)
-        : pool_(pool), ptr_(ptr), size_(size), stream_(stream) {}
-
     const CudaMemoryPool &pool_;
     void *ptr_;
     std::size_t size_;
-    const CudaStream &stream_;
+    std::shared_ptr<CudaStream> stream_;
 };
 
 } // namespace ragamuffin

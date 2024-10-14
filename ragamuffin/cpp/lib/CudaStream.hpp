@@ -5,6 +5,8 @@
 
 #include <cuda_runtime.h>
 
+#include "Utils.hpp"
+
 namespace ragamuffin {
 
 struct CudaStream {
@@ -15,11 +17,17 @@ struct CudaStream {
             throw std::runtime_error("Failed to create CUDA stream");
     }
 
-    ~CudaStream() {
-        auto ret = cudaStreamDestroy(this->stream_);
+    CudaStream(CudaStream &&other) noexcept : stream_(other.stream_) {
+        other.stream_ = nullptr;
+    }
 
-        if (ret != cudaSuccess)
-            throw std::runtime_error("Failed to destroy CUDA stream");
+    CudaStream(CudaStream &other) = delete;
+
+    ~CudaStream() {
+        if (this->stream_) {
+            auto ret = cudaStreamDestroy(this->stream_);
+            CheckCudaError(ret, "Failed to destroy CUDA stream");
+        }
     }
 
     inline cudaStream_t GetHandle() const noexcept { return this->stream_; }
