@@ -8,6 +8,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 namespace ragamuffin {
@@ -18,25 +19,33 @@ struct CudaMemoryPool {
     CudaMemoryPool(std::size_t max_size, const CudaDevice &device);
     ~CudaMemoryPool();
 
-    std::unique_ptr<CudaMemoryPoolBlock> Allocate(std::size_t size) const;  // default stream
-    std::unique_ptr<CudaMemoryPoolBlock> Allocate(std::size_t size, std::shared_ptr<CudaStream> stream) const;
-    void Free(void *handle, const CudaStream &stream) const;
+    // Allocate/deallocate memory from the pool
+    std::shared_ptr<CudaMemoryPoolBlock> Allocate(std::size_t size);  // default stream
+    std::shared_ptr<CudaMemoryPoolBlock> Allocate(std::size_t size, std::shared_ptr<CudaStream> stream);
+    void Free(void *handle, const CudaStream &stream, bool from_destructor = false);
+
+    // Resize the pool; this is very slow and should be used sparingly. It copies all the memory from the old pool to the new pool,
+    // updating the pointers in the process. This is not thread-safe.
+    void Resize(std::size_t new_size, std::shared_ptr<CudaStream> stream);
 
     inline std::size_t GetMaxSize() const noexcept { return this->max_size_; }
 
 private:
     std::size_t max_size_;
     cudaMemPool_t pool_;
+    std::unordered_map<void *, std::shared_ptr<CudaMemoryPoolBlock>> blocks_;
+    CudaDevice device_;
 };
 
 struct CudaMemoryPoolBlock {
-    CudaMemoryPoolBlock(const CudaMemoryPool &pool, void *ptr, std::size_t size, std::shared_ptr<CudaStream> stream)
+    CudaMemoryPoolBlock(CudaMemoryPool &pool, void *ptr, std::size_t size, std::shared_ptr<CudaStream> stream)
         : pool_(pool), ptr_(ptr), size_(size), stream_(stream) {}
 
     // Destructor
     ~CudaMemoryPoolBlock() {
-        if (this->ptr_)
-            this->pool_.Free(this->ptr_, *this->stream_);
+        if (this->ptr_) {
+            this->pool_.Free(this->ptr_, *this->stream_, true);
+        }
     }
 
     // Move constructor
@@ -55,11 +64,17 @@ struct CudaMemoryPoolBlock {
     inline std::size_t GetSize() const noexcept { return this->size_; }
     inline const CudaStream &GetStream() const noexcept { return *this->stream_; }
 
+    inline void Free() {
+        this->pool_.Free(this->ptr_, *this->stream_);
+        this->ptr_ = nullptr;
+    }
+
 private:
-    const CudaMemoryPool &pool_;
+    CudaMemoryPool &pool_;
     void *ptr_;
     std::size_t size_;
     std::shared_ptr<CudaStream> stream_;
+    bool freed_ = false;
 };
 
 } // namespace ragamuffin

@@ -19,12 +19,12 @@ struct CudaVector {
     using cuda_data_type = T;
 
     // Allocate from a memory pool
-    CudaVector(std::size_t size, const CudaMemoryPool &pool) : data_(nullptr), size_(size) {
+    CudaVector(std::size_t size, CudaMemoryPool &pool) : data_(nullptr), size_(size) {
         this->block_ = pool.Allocate(size * sizeof(T));
         this->data_ = static_cast<T*>((*this->block_)->GetHandle());
     }
 
-    CudaVector(std::size_t size, const CudaMemoryPool &pool, std::shared_ptr<CudaStream> stream) : data_(nullptr), size_(size) {
+    CudaVector(std::size_t size, CudaMemoryPool &pool, std::shared_ptr<CudaStream> stream) : data_(nullptr), size_(size) {
         this->block_ = pool.Allocate(size * sizeof(T), stream);
         this->data_ = static_cast<T*>((*this->block_)->GetHandle());
     }
@@ -69,7 +69,7 @@ struct CudaVector {
 private:
     T *data_;
     std::size_t size_;
-    std::optional<std::unique_ptr<CudaMemoryPoolBlock>> block_;
+    std::optional<std::shared_ptr<CudaMemoryPoolBlock>> block_;
 };
 
 template <typename FirstIt, typename LastIt>
@@ -77,11 +77,11 @@ inline std::pair<
     std::vector<
         std::unique_ptr<CudaVector<typename std::iterator_traits<FirstIt>::value_type::cuda_data_type>>
     >,
-    std::unique_ptr<CudaMemoryPoolBlock>
+    std::shared_ptr<CudaMemoryPoolBlock>
 > Contigify(
     FirstIt first,
     LastIt last,
-    const CudaMemoryPool &pool,
+    CudaMemoryPool &pool,
     std::shared_ptr<CudaStream> stream
 ) {
     using T = typename std::iterator_traits<FirstIt>::value_type::cuda_data_type;
